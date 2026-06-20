@@ -6,6 +6,7 @@ import de.leserkonto.app.data.model.Loan
 import de.leserkonto.app.data.model.OpacResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.Cookie
 import okhttp3.CookieJar
 import okhttp3.FormBody
@@ -156,29 +157,58 @@ class BibliothecaOpenClient(
         }
         sb.appendLine()
 
+        var resultDoc = doc
         if (loginForm != null && username.isNotBlank() && password.isNotBlank()) {
             sb.appendLine("--- Login-Versuch mit eingegebenen Daten ---")
             val after = performLogin(doc, username, password)
             if (after == null) {
                 sb.appendLine("Kein POST möglich (Benutzer-/Passwortfeld nicht bestimmbar).")
             } else {
+                resultDoc = after
                 val text = after.text().lowercase()
                 sb.appendLine("Eingeloggt erkannt: ${isLoggedIn(after)}")
                 sb.appendLine("Passwortfeld danach noch vorhanden: ${after.select("input[type=password]").isNotEmpty()}")
                 sb.appendLine("Enthält 'abmelden/logout': ${listOf("abmelden", "logout", "ausloggen").any { text.contains(it) }}")
                 sb.appendLine("Generierte Fehlermeldung: ${loginErrorMessage(after)}")
-                sb.appendLine("--- Sichtbarer Text nach Login (Ausschnitt) ---")
-                sb.appendLine(after.text().take(1500))
-                sb.appendLine("--- HTML nach Login (Ausschnitt) ---")
-                sb.appendLine(after.outerHtml().take(20000))
             }
         } else {
-            sb.appendLine("(Kein Login-Versuch – Felder leer oder kein Login-Formular.)")
+            sb.appendLine("(Kein Login-Versuch – Felder leer oder bereits eingeloggt.)")
         }
         sb.appendLine()
-        sb.appendLine("=== HTML der Login-Seite (Ausschnitt) ===")
-        sb.appendLine(doc.outerHtml().take(20000))
+
+        // What would the loan parser extract from this page? (and how long it takes)
+        val dateRx = Regex("""\d{1,2}\.\d{1,2}\.\d{2,4}""")
+        val startNs = System.nanoTime()
+        val loans = try {
+            LoanParser.parse(resultDoc)
+        } catch (e: Throwable) {
+            sb.appendLine("PARSER-FEHLER: ${e::class.simpleName}: ${e.message}")
+            emptyList()
+        }
+        val ms = (System.nanoTime() - startNs) / 1_000_000
+        sb.appendLine("=== Parser-Ergebnis ===")
+        sb.appendLine("Erkannte Ausleihen: ${loans.size}  (Dauer ${ms} ms)")
+        loans.take(15).forEachIndexed { i, l ->
+            sb.appendLine("  [$i] '${l.title}' | fällig=${l.dueDate} | verlängerbar=${l.renewable} | id=${l.id}")
+        }
+        sb.appendLine("<tr> mit Datum: ${resultDoc.select("tr").count { dateRx.containsMatchIn(it.text()) }}")
+        sb.appendLine()
+
+        // Cleaned HTML of the loans area (VIEWSTATE/scripts stripped) so the
+        // parsing selectors can be tuned against the real markup.
+        sb.appendLine("=== Ausleih-Bereich HTML (bereinigt) ===")
+        val loansArea = resultDoc.select("[id*=grdViewLoans], [id*=tpnlLoans], [id*=LoansView]").firstOrNull()
+            ?: resultDoc.select("table").maxByOrNull { it.select("tr").size }
+            ?: resultDoc.body()
+        sb.appendLine(sanitizeHtml(loansArea).take(20000))
         return sb.toString()
+    }
+
+    /** Strips bulky/irrelevant nodes (VIEWSTATE, scripts, styles) for readable diagnostics. */
+    private fun sanitizeHtml(element: org.jsoup.nodes.Element): String {
+        val clone = element.clone()
+        clone.select("input[type=hidden], script, style, link, noscript, meta, svg, path, img").remove()
+        return clone.outerHtml()
     }
 
     // ---------------------------------------------------------------- internals
@@ -434,7 +464,12 @@ class BibliothecaOpenClient(
     private suspend inline fun <T> runCatchingIo(crossinline block: () -> T): OpacResult<T> =
         withContext(Dispatchers.IO) {
             try {
-                OpacResult.Success(block())
+                // Safety net: never let a stuck request/parse hang the UI forever.
+                val value = withTimeoutOrNull(45_000L) { block() }
+                    ?: return@withContext OpacResult.Error(
+                        "Zeitüberschreitung – der Bibliotheksserver antwortet nicht."
+                    )
+                OpacResult.Success(value)
             } catch (e: OpacException) {
                 OpacResult.Error(e.message ?: "Unbekannter Fehler", e)
             } catch (e: Exception) {
