@@ -194,21 +194,39 @@ class BibliothecaOpenClient(
         sb.appendLine("<tr> mit Datum: ${resultDoc.select("tr").count { dateRx.containsMatchIn(it.text()) }}")
         sb.appendLine()
 
-        // Cleaned HTML of the loans area (VIEWSTATE/scripts stripped) so the
-        // parsing selectors can be tuned against the real markup.
-        sb.appendLine("=== Ausleih-Bereich HTML (bereinigt) ===")
-        val loansArea = resultDoc.select("[id*=grdViewLoans], [id*=tpnlLoans], [id*=LoansView]").firstOrNull()
+        // Structured, cell-by-cell dump of the real loans table so the parser
+        // can be mapped to the actual columns (title/author/date/cover/status).
+        sb.appendLine("=== Ausleih-Tabelle (strukturiert) ===")
+        val grid = resultDoc.select("table[id*=grdViewLoans]").firstOrNull()
             ?: resultDoc.select("table").maxByOrNull { it.select("tr").size }
-            ?: resultDoc.body()
-        sb.appendLine(sanitizeHtml(loansArea).take(20000))
+        if (grid == null) {
+            sb.appendLine("Keine Tabelle gefunden.")
+        } else {
+            sb.appendLine("Tabelle id='${grid.id()}'")
+            val rows = grid.select("tr")
+            sb.appendLine("Zeilen: ${rows.size}")
+            rows.forEachIndexed { ri, row ->
+                val cells = row.select("th, td")
+                sb.appendLine("-- Zeile $ri (${cells.size} Zellen)")
+                cells.forEachIndexed { ci, c ->
+                    val cls = c.className()
+                    val txt = c.text().trim().replace(Regex("\\s+"), " ").take(160)
+                    sb.append("   [$ci]")
+                    if (cls.isNotBlank()) sb.append(" class='$cls'")
+                    sb.append(" '$txt'")
+                    c.select("img").firstOrNull()?.let { img ->
+                        val src = img.absUrl("src").ifBlank { img.attr("src") }
+                        if (src.isNotBlank()) sb.append(" IMG=${src.take(160)}")
+                        img.attr("alt").takeIf { it.isNotBlank() }?.let { sb.append(" ALT='$it'") }
+                    }
+                    c.select("a[href]").firstOrNull()?.let { a ->
+                        sb.append(" HREF=${a.attr("href").take(120)}")
+                    }
+                    sb.appendLine()
+                }
+            }
+        }
         return sb.toString()
-    }
-
-    /** Strips bulky/irrelevant nodes (VIEWSTATE, scripts, styles) for readable diagnostics. */
-    private fun sanitizeHtml(element: org.jsoup.nodes.Element): String {
-        val clone = element.clone()
-        clone.select("input[type=hidden], script, style, link, noscript, meta, svg, path, img").remove()
-        return clone.outerHtml()
     }
 
     // ---------------------------------------------------------------- internals
