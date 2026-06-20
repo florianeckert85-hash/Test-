@@ -155,9 +155,11 @@ class AppViewModel(
 
     // -------------------------------------------------------------- settings
 
-    fun setReminderDays(days: Int) = viewModelScope.launch { settingsStore.setReminderDaysBefore(days) }
+    fun toggleReminderOffset(day: Int, enabled: Boolean) =
+        viewModelScope.launch { settingsStore.toggleReminderOffset(day, enabled) }
     fun setAutoRenew(enabled: Boolean) = viewModelScope.launch { settingsStore.setAutoRenew(enabled) }
-    fun setAutoRenewDays(days: Int) = viewModelScope.launch { settingsStore.setAutoRenewDaysBefore(days) }
+    fun setAutoRenewDaysBefore(days: Int) = viewModelScope.launch { settingsStore.setAutoRenewDaysBefore(days) }
+    fun setAutoRenewDaysAfter(days: Int) = viewModelScope.launch { settingsStore.setAutoRenewDaysAfter(days) }
     fun setNotifications(enabled: Boolean) = viewModelScope.launch { settingsStore.setNotificationsEnabled(enabled) }
 
     fun consumeMessages() = _state.update { it.copy(error = null, message = null) }

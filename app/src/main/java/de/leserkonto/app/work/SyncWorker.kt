@@ -32,11 +32,14 @@ class SyncWorker(
             is OpacResult.Error -> return Result.retry()
         }
 
-        // 2) Optional auto-renewal for items due within autoRenewDaysBefore.
+        // 2) Optional auto-renewal for items inside the configured window:
+        //    from autoRenewDaysBefore days before … to autoRenewDaysAfter after.
         var renewedCount = 0
         if (settings.autoRenew) {
+            val lower = -settings.autoRenewDaysAfter.toLong()
+            val upper = settings.autoRenewDaysBefore.toLong()
             val dueForRenew = account.loans.filter { loan ->
-                loan.renewable && (loan.daysUntilDue()?.let { it in 0..settings.autoRenewDaysBefore.toLong() } == true)
+                loan.renewable && (loan.daysUntilDue()?.let { it in lower..upper } == true)
             }
             for (loan in dueForRenew) {
                 if (repo.renew(loan) is OpacResult.Success) renewedCount++
@@ -48,13 +51,26 @@ class SyncWorker(
             }
         }
 
-        // 3) Reminder for everything still due soon (or overdue).
-        if (settings.notificationsEnabled) {
+        // 3) Multi-stage reminders: notify once per crossed stage, per item.
+        if (settings.notificationsEnabled && settings.reminderOffsets.isNotEmpty()) {
             val current = repo.account.value ?: account
-            val dueSoon = current.loans.filter { loan: Loan ->
-                loan.daysUntilDue()?.let { it <= settings.reminderDaysBefore } == true
-            }.sortedBy { it.dueDate }
-            container.notificationHelper.notifyDueSoon(dueSoon)
+            val alreadyNotified = container.settingsStore.notifiedMarkers()
+            val activeMarkers = mutableSetOf<String>()
+            val newlyDue = mutableListOf<Loan>()
+            for (loan in current.loans) {
+                val days = loan.daysUntilDue() ?: continue
+                val crossed = settings.reminderOffsets.filter { days <= it }
+                if (crossed.isEmpty()) continue
+                val key = "${loan.title}|${loan.dueDate}"
+                val markers = crossed.map { "$key|$it" }
+                activeMarkers.addAll(markers)
+                if (markers.any { it !in alreadyNotified }) newlyDue.add(loan)
+            }
+            if (newlyDue.isNotEmpty()) {
+                container.notificationHelper.notifyDueSoon(newlyDue.sortedBy { it.dueDate })
+            }
+            // Keep only markers for items/stages still relevant (prunes gone items).
+            container.settingsStore.replaceNotifiedMarkers(activeMarkers)
         }
 
         return Result.success()

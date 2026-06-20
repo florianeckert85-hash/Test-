@@ -23,6 +23,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -50,6 +51,7 @@ import android.view.autofill.AutofillManager
 import de.leserkonto.app.BuildConfig
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -78,6 +80,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import de.leserkonto.app.data.model.Loan
+import de.leserkonto.app.data.store.SettingsStore
 import de.leserkonto.app.ui.AppViewModel
 import de.leserkonto.app.ui.UiState
 import java.time.format.DateTimeFormatter
@@ -493,17 +496,15 @@ fun SettingsScreen(state: UiState, vm: AppViewModel) {
             )
         }
 
-        StepperRow(
-            title = "Erinnerung vorab",
-            value = s.reminderDaysBefore,
-            suffix = if (s.reminderDaysBefore == 1) "Tag" else "Tage",
-            range = 0..14,
-            onChange = { vm.setReminderDays(it) },
-        )
+        if (s.notificationsEnabled) {
+            ReminderStagesRow(selected = s.reminderOffsets) { day, on ->
+                vm.toggleReminderOffset(day, on)
+            }
+        }
 
         SettingRow(
             title = "Automatisch verlängern",
-            subtitle = "Verlängert verlängerbare Medien kurz vor Fälligkeit von selbst",
+            subtitle = "Verlängert verlängerbare Medien innerhalb des Fensters von selbst",
         ) {
             androidx.compose.material3.Switch(
                 checked = s.autoRenew,
@@ -513,11 +514,18 @@ fun SettingsScreen(state: UiState, vm: AppViewModel) {
 
         if (s.autoRenew) {
             StepperRow(
-                title = "Auto-Verlängerung",
+                title = "Verlängern ab",
                 value = s.autoRenewDaysBefore,
-                suffix = "Tage vorher",
-                range = 1..7,
-                onChange = { vm.setAutoRenewDays(it) },
+                suffix = if (s.autoRenewDaysBefore == 1) "Tag vorher" else "Tage vorher",
+                range = 0..7,
+                onChange = { vm.setAutoRenewDaysBefore(it) },
+            )
+            StepperRow(
+                title = "Verlängern bis",
+                value = s.autoRenewDaysAfter,
+                suffix = if (s.autoRenewDaysAfter == 1) "Tag nach Fälligkeit" else "Tage nach Fälligkeit",
+                range = 0..7,
+                onChange = { vm.setAutoRenewDaysAfter(it) },
             )
         }
 
@@ -578,6 +586,40 @@ private fun StepperRow(
         Text("$value $suffix", style = MaterialTheme.typography.bodyLarge)
         TextButton(onClick = { if (value < range.last) onChange(value + 1) }) { Text("+") }
     }
+}
+
+/** Multi-select of reminder stages (days before due; 0 = due day, −1 = overdue). */
+@Composable
+private fun ReminderStagesRow(selected: Set<Int>, onToggle: (Int, Boolean) -> Unit) {
+    Column(Modifier.fillMaxWidth()) {
+        Text("Erinnerungen vorab", style = MaterialTheme.typography.titleMedium)
+        Text(
+            "Wähle, wann erinnert wird – mehrere Stufen möglich.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            SettingsStore.SELECTABLE_OFFSETS.forEach { off ->
+                val on = off in selected
+                FilterChip(
+                    selected = on,
+                    onClick = { onToggle(off, !on) },
+                    label = { Text(reminderStageLabel(off)) },
+                )
+            }
+        }
+    }
+}
+
+private fun reminderStageLabel(off: Int): String = when {
+    off > 1 -> "$off Tage"
+    off == 1 -> "1 Tag"
+    off == 0 -> "Fällig"
+    else -> "Überfällig"
 }
 
 /**
