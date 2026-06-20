@@ -27,6 +27,8 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -48,7 +50,10 @@ import android.net.Uri
 import android.os.PowerManager
 import android.provider.Settings
 import android.view.autofill.AutofillManager
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import de.leserkonto.app.BuildConfig
+import de.leserkonto.app.data.model.LibraryConfig
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
@@ -56,11 +61,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Casino
 import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import coil.compose.AsyncImage
@@ -78,6 +83,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.unit.dp
 import de.leserkonto.app.data.model.Loan
 import de.leserkonto.app.data.store.SettingsStore
@@ -232,14 +238,20 @@ fun LoginScreen(state: UiState, vm: AppViewModel) {
 
 // ----------------------------------------------------------------------- main
 
+private enum class MainTab(val title: String, val label: String) {
+    LOANS("Geliehene Medien", "Medien"),
+    SEARCH("Katalogsuche", "Suche"),
+    SETTINGS("Einstellungen", "Einstellungen"),
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(state: UiState, vm: AppViewModel) {
-    var showSettings by remember { mutableStateOf(false) }
+    var tab by remember { mutableStateOf(MainTab.LOANS) }
     val snackbar = remember { SnackbarHostState() }
 
-    // System back closes the settings screen instead of leaving the app.
-    BackHandler(enabled = showSettings) { showSettings = false }
+    // System back returns to the loans tab from anywhere else.
+    BackHandler(enabled = tab != MainTab.LOANS) { tab = MainTab.LOANS }
 
     LaunchedEffect(state.message, state.error) {
         val text = state.message ?: state.error
@@ -253,22 +265,12 @@ fun MainScreen(state: UiState, vm: AppViewModel) {
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
-                title = { Text(if (showSettings) "Einstellungen" else "Geliehene Medien") },
-                navigationIcon = {
-                    if (showSettings) {
-                        IconButton(onClick = { showSettings = false }) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Zurück")
-                        }
-                    }
-                },
+                title = { Text(tab.title) },
                 actions = {
-                    if (!showSettings) {
+                    if (tab == MainTab.LOANS) {
                         IconButton(onClick = { vm.refresh() }) {
                             Icon(Icons.Default.Refresh, contentDescription = "Aktualisieren")
                         }
-                    }
-                    IconButton(onClick = { showSettings = !showSettings }) {
-                        Icon(Icons.Default.Settings, contentDescription = "Einstellungen")
                     }
                     IconButton(onClick = { vm.logout() }) {
                         Icon(Icons.Default.Logout, contentDescription = "Abmelden")
@@ -276,15 +278,64 @@ fun MainScreen(state: UiState, vm: AppViewModel) {
                 },
             )
         },
+        bottomBar = {
+            NavigationBar {
+                MainTab.values().forEach { t ->
+                    NavigationBarItem(
+                        selected = tab == t,
+                        onClick = { tab = t },
+                        icon = {
+                            Icon(
+                                when (t) {
+                                    MainTab.LOANS -> Icons.AutoMirrored.Filled.MenuBook
+                                    MainTab.SEARCH -> Icons.Default.Search
+                                    MainTab.SETTINGS -> Icons.Default.Settings
+                                },
+                                contentDescription = t.label,
+                            )
+                        },
+                        label = { Text(t.label) },
+                    )
+                }
+            }
+        },
     ) { padding ->
-        Column(Modifier.padding(padding)) {
-            if (showSettings) {
-                SettingsScreen(state, vm)
-            } else {
-                AccountScreen(state, vm)
+        Box(Modifier.padding(padding)) {
+            when (tab) {
+                MainTab.LOANS -> AccountScreen(state, vm)
+                MainTab.SEARCH -> SearchScreen()
+                MainTab.SETTINGS -> SettingsScreen(state, vm)
             }
         }
     }
+}
+
+/** Catalogue search shown as the real library website inside a WebView. */
+@Composable
+fun SearchScreen() {
+    val url = remember { LibraryConfig().searchUrl }
+    var webView by remember { mutableStateOf<WebView?>(null) }
+    var canGoBack by remember { mutableStateOf(false) }
+
+    // Let device-back navigate the web history before leaving the tab.
+    BackHandler(enabled = canGoBack) { webView?.goBack() }
+
+    AndroidView(
+        modifier = Modifier.fillMaxSize(),
+        factory = { ctx ->
+            WebView(ctx).apply {
+                settings.javaScriptEnabled = true
+                settings.domStorageEnabled = true
+                webViewClient = object : WebViewClient() {
+                    override fun doUpdateVisitedHistory(view: WebView, u: String?, isReload: Boolean) {
+                        canGoBack = view.canGoBack()
+                    }
+                }
+                loadUrl(url)
+                webView = this
+            }
+        },
+    )
 }
 
 // -------------------------------------------------------------------- account
@@ -513,20 +564,7 @@ fun SettingsScreen(state: UiState, vm: AppViewModel) {
         }
 
         if (s.autoRenew) {
-            StepperRow(
-                title = "Verlängern ab",
-                value = s.autoRenewDaysBefore,
-                suffix = if (s.autoRenewDaysBefore == 1) "Tag vorher" else "Tage vorher",
-                range = 0..7,
-                onChange = { vm.setAutoRenewDaysBefore(it) },
-            )
-            StepperRow(
-                title = "Verlängern bis",
-                value = s.autoRenewDaysAfter,
-                suffix = if (s.autoRenewDaysAfter == 1) "Tag nach Fälligkeit" else "Tage nach Fälligkeit",
-                range = 0..7,
-                onChange = { vm.setAutoRenewDaysAfter(it) },
-            )
+            AutoRenewOffsetRow(value = s.autoRenewDayOffset) { vm.setAutoRenewDayOffset(it) }
         }
 
         BatteryOptimizationRow()
@@ -620,6 +658,31 @@ private fun reminderStageLabel(off: Int): String = when {
     off == 1 -> "1 Tag"
     off == 0 -> "Fällig"
     else -> "Überfällig"
+}
+
+/** Single setting for when auto-renewal runs, relative to the due date. */
+@Composable
+private fun AutoRenewOffsetRow(value: Int, onChange: (Int) -> Unit) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text("Ausführen", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+        TextButton(
+            onClick = { if (value > SettingsStore.AUTO_RENEW_MIN) onChange(value - 1) },
+            enabled = value > SettingsStore.AUTO_RENEW_MIN,
+        ) { Text("−") }
+        Text(autoRenewOffsetLabel(value), style = MaterialTheme.typography.bodyMedium)
+        TextButton(
+            onClick = { if (value < SettingsStore.AUTO_RENEW_MAX) onChange(value + 1) },
+            enabled = value < SettingsStore.AUTO_RENEW_MAX,
+        ) { Text("+") }
+    }
+}
+
+private fun autoRenewOffsetLabel(v: Int): String = when {
+    v >= 2 -> "$v Tage vor Fälligkeit"
+    v == 1 -> "1 Tag vor Fälligkeit"
+    v == 0 -> "am Fälligkeitstag"
+    v == -1 -> "1 Tag nach Fälligkeit"
+    else -> "${-v} Tage nach Fälligkeit"
 }
 
 /**

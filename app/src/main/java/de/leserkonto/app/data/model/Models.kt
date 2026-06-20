@@ -17,6 +17,10 @@ data class LibraryConfig(
     /** Entry/account URL, e.g. https://bibliothek.komm.one/wehr/Leserkonto */
     val accountUrl: String
         get() = "${baseUrl.trimEnd('/')}/$branch/Leserkonto"
+
+    /** Catalogue search URL, e.g. https://bibliothek.komm.one/wehr/Mediensuche */
+    val searchUrl: String
+        get() = "${baseUrl.trimEnd('/')}/$branch/Mediensuche"
 }
 
 /** A single borrowed item shown in the reader account. */

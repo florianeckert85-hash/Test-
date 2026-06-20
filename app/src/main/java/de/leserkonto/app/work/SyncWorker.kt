@@ -32,14 +32,13 @@ class SyncWorker(
             is OpacResult.Error -> return Result.retry()
         }
 
-        // 2) Optional auto-renewal for items inside the configured window:
-        //    from autoRenewDaysBefore days before … to autoRenewDaysAfter after.
+        // 2) Optional auto-renewal once an item reaches the configured point
+        //    relative to its due date (+2 = two days before … −1 = one day overdue).
         var renewedCount = 0
         if (settings.autoRenew) {
-            val lower = -settings.autoRenewDaysAfter.toLong()
-            val upper = settings.autoRenewDaysBefore.toLong()
+            val threshold = settings.autoRenewDayOffset.toLong()
             val dueForRenew = account.loans.filter { loan ->
-                loan.renewable && (loan.daysUntilDue()?.let { it in lower..upper } == true)
+                loan.renewable && (loan.daysUntilDue()?.let { it <= threshold } == true)
             }
             for (loan in dueForRenew) {
                 if (repo.renew(loan) is OpacResult.Success) renewedCount++
