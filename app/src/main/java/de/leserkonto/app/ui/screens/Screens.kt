@@ -40,7 +40,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import android.annotation.SuppressLint
+import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import android.os.PowerManager
+import android.provider.Settings
 import android.view.autofill.AutofillManager
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
@@ -515,6 +520,8 @@ fun SettingsScreen(state: UiState, vm: AppViewModel) {
             )
         }
 
+        BatteryOptimizationRow()
+
         Spacer(Modifier.height(8.dp))
         Text(
             "Hinweis: Die App liest dein Konto direkt vom Bibliotheksportal aus. " +
@@ -562,5 +569,57 @@ private fun StepperRow(
         TextButton(onClick = { if (value > range.first) onChange(value - 1) }) { Text("−") }
         Text("$value $suffix", style = MaterialTheme.typography.bodyLarge)
         TextButton(onClick = { if (value < range.last) onChange(value + 1) }) { Text("+") }
+    }
+}
+
+/**
+ * Lets the user exempt the app from battery optimisation. This is the single
+ * most effective fix for "reminders stop after the app hasn't been opened for a
+ * while" (Doze / OEM app standby). Status is read on (re)composition.
+ */
+@Composable
+private fun BatteryOptimizationRow() {
+    val context = LocalContext.current
+    val pm = remember { context.getSystemService(PowerManager::class.java) }
+    var ignoring by remember {
+        mutableStateOf(pm?.isIgnoringBatteryOptimizations(context.packageName) == true)
+    }
+
+    Column(Modifier.fillMaxWidth()) {
+        Text("Erinnerungen zuverlässig erhalten", style = MaterialTheme.typography.titleMedium)
+        Text(
+            if (ignoring) {
+                "Hintergrund-Ausführung ist erlaubt. Erinnerungen sollten zuverlässig kommen."
+            } else {
+                "Damit Erinnerungen auch nach längerem Nichtöffnen kommen, sollte die App " +
+                    "von der Akku-Optimierung ausgenommen werden."
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (!ignoring) {
+            OutlinedButton(onClick = {
+                requestIgnoreBatteryOptimizations(context)
+                // Re-read shortly after; user may grant in the system dialog.
+                ignoring = pm?.isIgnoringBatteryOptimizations(context.packageName) == true
+            }) {
+                Text("Im Hintergrund erlauben")
+            }
+        }
+    }
+}
+
+@SuppressLint("BatteryLife")
+private fun requestIgnoreBatteryOptimizations(context: Context) {
+    val pkg = "package:${context.packageName}"
+    runCatching {
+        context.startActivity(
+            Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse(pkg))
+        )
+    }.onFailure {
+        // Fallback: open the battery-optimization settings list.
+        runCatching {
+            context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+        }
     }
 }

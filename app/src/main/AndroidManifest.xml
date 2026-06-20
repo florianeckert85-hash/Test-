@@ -5,6 +5,11 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Needed on Android 13+ to show the due-date reminders -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Re-schedule the daily sync after a device reboot -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Let the user exempt the app from battery optimisation so reminders keep
+         working even when the app hasn't been opened for a while -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <application
         android:name=".LeserkontoApplication"
@@ -26,5 +31,16 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Re-arms the periodic sync after a reboot (WorkManager also persists
+             work itself; this is a defensive belt-and-suspenders). -->
+        <receiver
+            android:name=".work.BootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>
