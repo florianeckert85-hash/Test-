@@ -3,6 +3,7 @@ package de.leserkonto.app.data.opac
 import de.leserkonto.app.data.model.Loan
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
+import org.jsoup.select.Elements
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -38,11 +39,81 @@ object LoanParser {
     private val RENEW_WORDS = listOf("verläng", "verlaeng", "renew")
 
     fun parse(doc: Document): List<Loan> {
+        // Preferred: the OCLC OPEN / DNN "grdViewLoans" GridView (Komm.ONE /
+        // BIBLIOTHECA). Falls back to the generic heuristic for other templates.
+        parseOpenGrid(doc)?.takeIf { it.isNotEmpty() }?.let { return it }
+
         val rows = candidateRows(doc)
         return rows.mapNotNull { parseRow(it) }
             // De-duplicate: nested containers can both match the date test.
             .distinctBy { (it.title to it.dueDate) }
     }
+
+    // ---------------------------------------------- OCLC OPEN (grdViewLoans)
+
+    /**
+     * Parses the OCLC OPEN loans GridView, whose rows have fixed, labelled cells:
+     * cover (img), title (detail link), "Verfasser: …", "Mediengruppe: …",
+     * "Aktuelle Frist: dd.mm.yyyy", and a per-item "__doPostBack(…BtnExtendThis…)"
+     * renew control. Returns null if this layout is not present.
+     */
+    private fun parseOpenGrid(doc: Document): List<Loan>? {
+        val grid = doc.selectFirst("table[id*=grdViewLoans]") ?: return null
+        return grid.select("tr").mapNotNull { parseOpenRow(it) }
+    }
+
+    private fun parseOpenRow(row: Element): Loan? {
+        val cells = row.select("td")
+        if (cells.isEmpty()) return null // header row (th) or spacer
+
+        val titleLink = row.selectFirst("a[href*=Mediensuche], a[href*=Einfache-Suche]")
+        val img = row.selectFirst("img")
+        val linkText = titleLink?.text()?.trim()
+        val altTitle = (img?.attr("alt").orEmpty()).removePrefix("Cover von ").trim()
+        val title = (linkText?.takeIf { it.isNotBlank() } ?: altTitle.takeIf { it.isNotBlank() })
+            ?: return null
+
+        val coverSrc = img?.let { it.absUrl("src").ifBlank { it.attr("src") } }
+        val coverUrl = coverSrc?.takeUnless {
+            it.isBlank() || it.contains("emptyURL", true) || it.contains("/Fallbacks/", true)
+        }
+
+        val author = labelValue(cells, "Verfasser")
+        val mediaType = labelValue(cells, "Mediengruppe")
+        val dueText = labelValue(cells, "Aktuelle Frist") ?: labelValue(cells, "Frist")
+        val dueDate = dueText?.let { parseFirstDate(it) }
+            ?: cells.firstNotNullOfOrNull { parseFirstDate(it.text()) }
+
+        // Per-item renew control: javascript:__doPostBack('…BtnExtendThis','')
+        val renewTarget = row.select("a[href]").firstNotNullOfOrNull { a ->
+            extractPostbackTarget(a.attr("href"))?.takeIf { it.contains("Extend", ignoreCase = true) }
+        }
+
+        val detailUrl = titleLink?.let { it.absUrl("href").ifBlank { it.attr("href") } }
+            ?.takeIf { it.isNotBlank() }
+
+        return Loan(
+            id = renewTarget,
+            title = clean(title),
+            author = author?.takeIf { it.isNotBlank() },
+            mediaType = mediaType?.takeIf { it.isNotBlank() },
+            dueDate = dueDate,
+            renewable = renewTarget != null,
+            renewalsRemaining = null,
+            status = null,
+            branch = null,
+            coverUrl = coverUrl,
+            detailUrl = detailUrl,
+        )
+    }
+
+    /** Value of a "Label: value" cell (e.g. "Verfasser: Kafka, Franz" -> "Kafka, Franz"). */
+    private fun labelValue(cells: Elements, label: String): String? =
+        cells.firstOrNull { it.text().trim().startsWith("$label:", ignoreCase = true) }
+            ?.text()?.substringAfter(":")?.trim()
+
+    private fun extractPostbackTarget(href: String): String? =
+        Regex("""__doPostBack\('([^']+)'""").find(href)?.groupValues?.get(1)
 
     /**
      * Collect candidate "row" elements. Prefer real table rows; if the layout

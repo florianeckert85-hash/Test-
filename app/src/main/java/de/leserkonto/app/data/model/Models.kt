@@ -33,6 +33,10 @@ data class Loan(
     /** Free-text status as shown by the OPAC, e.g. "verlängerbar", "vorgemerkt". */
     val status: String?,
     val branch: String?,
+    /** Cover image URL, if the catalogue provides a real one (null = use a placeholder). */
+    val coverUrl: String? = null,
+    /** Link to the catalogue detail page for this item, if available. */
+    val detailUrl: String? = null,
 ) {
     /** Days until due (negative = overdue). Null if no due date could be parsed. */
     fun daysUntilDue(today: LocalDate = LocalDate.now()): Long? =

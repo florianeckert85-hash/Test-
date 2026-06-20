@@ -43,7 +43,19 @@ import androidx.compose.runtime.setValue
 import android.content.Intent
 import android.view.autofill.AutofillManager
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.filled.Album
+import androidx.compose.material.icons.filled.Casino
+import androidx.compose.material.icons.filled.Movie
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import coil.compose.AsyncImage
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
@@ -365,45 +377,91 @@ fun LoanCard(loan: Loan, isRenewing: Boolean, onRenew: () -> Unit) {
     }
 
     Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp)) {
-            Text(
-                loan.title,
-                style = MaterialTheme.typography.titleMedium,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            loan.author?.takeIf { it.isNotBlank() }?.let {
-                Text(it, style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            Spacer(Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                loan.dueDate?.let {
-                    Text(it.format(dateFmt), style = MaterialTheme.typography.bodyMedium)
-                    Text("  ·  ", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(Modifier.padding(16.dp)) {
+            CoverThumbnail(loan)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    loan.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                loan.author?.takeIf { it.isNotBlank() }?.let {
+                    Text(it, style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                Text(dueText, color = dueColor, style = MaterialTheme.typography.bodyMedium)
-            }
-            loan.renewalsRemaining?.let {
-                Text("Noch $it× verlängerbar",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-
-            if (loan.renewable) {
+                loan.mediaType?.takeIf { it.isNotBlank() }?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 Spacer(Modifier.height(8.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    TextButton(onClick = onRenew, enabled = !isRenewing) {
-                        if (isRenewing) {
-                            CircularProgressIndicator(Modifier.height(18.dp))
-                        } else {
-                            Icon(Icons.Default.Autorenew, contentDescription = null)
-                            Text("  Verlängern")
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    loan.dueDate?.let {
+                        Text(it.format(dateFmt), style = MaterialTheme.typography.bodyMedium)
+                        Text("  ·  ", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Text(dueText, color = dueColor, style = MaterialTheme.typography.bodyMedium)
+                }
+                loan.renewalsRemaining?.let {
+                    Text("Noch $it× verlängerbar",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+
+                if (loan.renewable) {
+                    Spacer(Modifier.height(8.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        TextButton(onClick = onRenew, enabled = !isRenewing) {
+                            if (isRenewing) {
+                                CircularProgressIndicator(Modifier.height(18.dp))
+                            } else {
+                                Icon(Icons.Default.Autorenew, contentDescription = null)
+                                Text("  Verlängern")
+                            }
                         }
                     }
                 }
             }
         }
+    }
+}
+
+/** Leading visual for a loan: the real cover if available, otherwise a media-type icon. */
+@Composable
+private fun CoverThumbnail(loan: Loan) {
+    Box(
+        modifier = Modifier
+            .size(width = 52.dp, height = 72.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (loan.coverUrl != null) {
+            AsyncImage(
+                model = loan.coverUrl,
+                contentDescription = loan.title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            Icon(
+                imageVector = mediaIcon(loan.mediaType),
+                contentDescription = loan.mediaType,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/** A media-type icon used as a placeholder when no cover image is available. */
+private fun mediaIcon(type: String?): androidx.compose.ui.graphics.vector.ImageVector {
+    val t = type?.lowercase().orEmpty()
+    return when {
+        "spiel" in t -> Icons.Filled.Casino
+        listOf("cd", "musik", "audio", "hörbuch", "tonträger").any { it in t } -> Icons.Filled.Album
+        listOf("dvd", "blu", "film", "video").any { it in t } -> Icons.Filled.Movie
+        else -> Icons.AutoMirrored.Filled.MenuBook
     }
 }
 

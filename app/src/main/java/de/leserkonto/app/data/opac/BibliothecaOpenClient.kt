@@ -309,17 +309,33 @@ class BibliothecaOpenClient(
      * the matching checkbox.
      */
     private fun submitRenewal(accountDoc: Document, onlyId: String?): Boolean {
-        val form = findRenewalForm(accountDoc) ?: return false
-        val data = collectFormData(form)
+        val form = findRenewalForm(accountDoc)
+            ?: (accountDoc.selectFirst("form") as? FormElement)
+            ?: return false
 
-        // Tick the relevant checkboxes (forms usually omit unchecked boxes).
+        // OCLC OPEN / ASP.NET: a single item is renewed by firing its row's
+        // __doPostBack target (BtnExtendThis), carried in Loan.id.
+        if (onlyId != null && (onlyId.contains("doPostBack") || onlyId.contains("Extend", true) || onlyId.contains('$'))) {
+            val data = collectFormData(form)
+            data["__EVENTTARGET"] = onlyId
+            data["__EVENTARGUMENT"] = ""
+            val result = postForm(form, data) ?: return false
+            return renewalLooksConfirmed(result)
+        }
+
+        val data = collectFormData(form)
+        // Tick the relevant checkboxes (forms usually omit unchecked boxes). For
+        // "renew all" only tick the per-loan selection boxes, not unrelated ones
+        // (print options, cookie banner, …).
         val checkboxes = form.select("input[type=checkbox]")
         var ticked = 0
         for (cb in checkboxes) {
             val name = cb.attr("name")
             if (name.isBlank()) continue
+            val isLoanBox = listOf("chkselect", "chkallloans", "renew", "verläng")
+                .any { name.lowercase().contains(it) }
             val value = cb.attr("value").ifBlank { "on" }
-            val matches = onlyId == null || value == onlyId || name == onlyId
+            val matches = if (onlyId == null) isLoanBox else (value == onlyId || name == onlyId)
             if (matches) { data[name] = value; ticked++ }
         }
         if (onlyId != null && ticked == 0) {
@@ -327,11 +343,11 @@ class BibliothecaOpenClient(
             return submitPerItemRenewLink(accountDoc, onlyId)
         }
 
-        // Include the renew submit button.
+        // Include the renew submit button (matches BtnExtendMediums by id too).
         val renewBtn = form.select("input[type=submit], button")
             .firstOrNull { btn ->
-                val l = (btn.text() + " " + btn.attr("value") + " " + btn.attr("title")).lowercase()
-                listOf("verläng", "verlaeng", "renew").any { l.contains(it) }
+                val l = (btn.text() + " " + btn.attr("value") + " " + btn.attr("title") + " " + btn.id()).lowercase()
+                listOf("verläng", "verlaeng", "renew", "extend").any { l.contains(it) }
             }
         renewBtn?.let { if (it.attr("name").isNotBlank()) data[it.attr("name")] = it.attr("value").ifBlank { "1" } }
 

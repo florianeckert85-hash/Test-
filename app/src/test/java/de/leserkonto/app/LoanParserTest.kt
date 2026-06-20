@@ -53,6 +53,58 @@ class LoanParserTest {
     }
 
     @Test
+    fun `parses OCLC OPEN grdViewLoans grid with labelled cells`() {
+        val html = """
+            <html><body>
+            <a href="/wehr/Logout">Abmelden</a>
+            <table id="dnn_ctr362_MainView_tpnlLoans_ucLoansView_grdViewLoans">
+              <tr>
+                <th>Auswahl</th><th>Cover</th><th>Titel</th><th>Verfasser</th>
+                <th>Mediengruppe</th><th>Aktuelle Frist</th><th>Verlängerbar</th>
+              </tr>
+              <tr>
+                <td><input type="checkbox" name="x_chkSelect"></td>
+                <td><img src="https://x/StyleSheets/Images/Fallbacks/emptyURL.gif" alt="Cover von Der erste letzte Tag"></td>
+                <td><a href="https://bibliothek.komm.one/wehr/Mediensuche/Einfache-Suche?id=0121095">Der erste letzte Tag</a></td>
+                <td>Verfasser: Fitzek, Sebastian</td>
+                <td>Mediengruppe: Schöne Literatur</td>
+                <td>Aktuelle Frist: 17.07.2026</td>
+                <td><a href="javascript:__doPostBack('grdViewLoans_ctl07_BtnExtendThis','')">Verlängern</a></td>
+              </tr>
+              <tr>
+                <td><input type="checkbox" name="y_chkSelect"></td>
+                <td><img src="https://x/StyleSheets/Images/Fallbacks/emptyURL.gif" alt="Cover von Cacao"></td>
+                <td><a href="https://bibliothek.komm.one/wehr/Mediensuche/Einfache-Suche?id=0112535">Cacao</a></td>
+                <td>Verfasser:</td>
+                <td>Mediengruppe: Spiel</td>
+                <td>Aktuelle Frist: 02.07.2026</td>
+                <td><a href="javascript:__doPostBack('grdViewLoans_ctl04_BtnExtendThis','')">Verlängern</a></td>
+              </tr>
+            </table>
+            </body></html>
+        """.trimIndent()
+
+        val loans = LoanParser.parse(Jsoup.parse(html, "https://bibliothek.komm.one/wehr/Leserkonto"))
+
+        assertEquals(2, loans.size)
+
+        val first = loans[0]
+        assertEquals("Der erste letzte Tag", first.title)
+        assertEquals("Fitzek, Sebastian", first.author)
+        assertEquals("Schöne Literatur", first.mediaType)
+        assertEquals(LocalDate.of(2026, 7, 17), first.dueDate)
+        assertTrue("Item with a renew postback should be renewable", first.renewable)
+        assertTrue(first.id!!.contains("BtnExtendThis"))
+        assertEquals("Fallback cover gif should be treated as no cover", null, first.coverUrl)
+
+        val second = loans[1]
+        assertEquals("Cacao", second.title)
+        assertEquals("Spiel", second.mediaType)
+        assertEquals(null, second.author) // empty "Verfasser:" -> null
+        assertEquals(LocalDate.of(2026, 7, 2), second.dueDate)
+    }
+
+    @Test
     fun `picks the latest date as due date when several are present and unlabelled`() {
         val html = """
             <table><tr>
