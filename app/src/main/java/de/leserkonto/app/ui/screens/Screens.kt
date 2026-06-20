@@ -41,8 +41,19 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import android.content.Intent
+import android.view.autofill.AutofillManager
+import androidx.activity.compose.BackHandler
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.autofill.AutofillNode
+import androidx.compose.ui.autofill.AutofillType
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalAutofill
+import androidx.compose.ui.platform.LocalAutofillTree
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -55,6 +66,29 @@ import java.time.format.DateTimeFormatter
 
 private val dateFmt = DateTimeFormatter.ofPattern("dd.MM.yyyy")
 
+/**
+ * Wires a text field into the Android Autofill framework so password managers
+ * (e.g. Google Passwortmanager) can offer to fill — and later save — the value.
+ */
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+private fun Modifier.autofill(
+    types: List<AutofillType>,
+    onFill: (String) -> Unit,
+): Modifier {
+    val autofill = LocalAutofill.current
+    val node = remember { AutofillNode(autofillTypes = types, onFill = onFill) }
+    LocalAutofillTree.current += node
+    return this
+        .onGloballyPositioned { node.boundingBox = it.boundsInWindow() }
+        .onFocusChanged { focusState ->
+            autofill?.run {
+                if (focusState.isFocused) requestAutofillForNode(node)
+                else cancelAutofillForNode(node)
+            }
+        }
+}
+
 @Composable
 fun LeserkontoApp(state: UiState, vm: AppViewModel) {
     if (!state.loggedIn) {
@@ -66,11 +100,13 @@ fun LeserkontoApp(state: UiState, vm: AppViewModel) {
 
 // ---------------------------------------------------------------------- login
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun LoginScreen(state: UiState, vm: AppViewModel) {
     var user by remember { mutableStateOf("") }
     var pass by remember { mutableStateOf("") }
     val context = LocalContext.current
+    val autofillManager = remember { context.getSystemService(AutofillManager::class.java) }
 
     // When a diagnostic report is ready, open the system share sheet so the
     // user can send it (e.g. by email) for troubleshooting the login.
@@ -107,7 +143,9 @@ fun LoginScreen(state: UiState, vm: AppViewModel) {
             onValueChange = { user = it },
             label = { Text("Ausweisnummer") },
             singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .autofill(types = listOf(AutofillType.Username), onFill = { user = it }),
         )
         Spacer(Modifier.height(12.dp))
         OutlinedTextField(
@@ -117,7 +155,9 @@ fun LoginScreen(state: UiState, vm: AppViewModel) {
             singleLine = true,
             visualTransformation = PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .autofill(types = listOf(AutofillType.Password), onFill = { pass = it }),
         )
         Spacer(Modifier.height(8.dp))
         Text(
@@ -133,7 +173,11 @@ fun LoginScreen(state: UiState, vm: AppViewModel) {
 
         Spacer(Modifier.height(20.dp))
         Button(
-            onClick = { vm.login(user.trim(), pass) },
+            onClick = {
+                // Ask Android/Google to offer saving the entered credentials.
+                autofillManager?.commit()
+                vm.login(user.trim(), pass)
+            },
             enabled = !state.loading,
             modifier = Modifier.fillMaxWidth(),
         ) {
@@ -169,6 +213,9 @@ fun MainScreen(state: UiState, vm: AppViewModel) {
     var showSettings by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
 
+    // System back closes the settings screen instead of leaving the app.
+    BackHandler(enabled = showSettings) { showSettings = false }
+
     LaunchedEffect(state.message, state.error) {
         val text = state.message ?: state.error
         if (text != null) {
@@ -182,6 +229,13 @@ fun MainScreen(state: UiState, vm: AppViewModel) {
         topBar = {
             TopAppBar(
                 title = { Text(if (showSettings) "Einstellungen" else "Geliehene Medien") },
+                navigationIcon = {
+                    if (showSettings) {
+                        IconButton(onClick = { showSettings = false }) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Zurück")
+                        }
+                    }
+                },
                 actions = {
                     if (!showSettings) {
                         IconButton(onClick = { vm.refresh() }) {
