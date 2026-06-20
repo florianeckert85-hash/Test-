@@ -91,6 +91,20 @@ private fun Modifier.autofill(
 
 @Composable
 fun LeserkontoApp(state: UiState, vm: AppViewModel) {
+    val context = LocalContext.current
+    // When a diagnostic/crash report is ready, open the system share sheet.
+    // Lives here so it works from both the login and the logged-in screens.
+    LaunchedEffect(state.diagnostics) {
+        val report = state.diagnostics ?: return@LaunchedEffect
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, "Leserkonto Diagnose")
+            putExtra(Intent.EXTRA_TEXT, report)
+        }
+        context.startActivity(Intent.createChooser(send, "Diagnose teilen"))
+        vm.consumeDiagnostics()
+    }
+
     if (!state.loggedIn) {
         LoginScreen(state, vm)
     } else {
@@ -107,19 +121,6 @@ fun LoginScreen(state: UiState, vm: AppViewModel) {
     var pass by remember { mutableStateOf("") }
     val context = LocalContext.current
     val autofillManager = remember { context.getSystemService(AutofillManager::class.java) }
-
-    // When a diagnostic report is ready, open the system share sheet so the
-    // user can send it (e.g. by email) for troubleshooting the login.
-    LaunchedEffect(state.diagnostics) {
-        val report = state.diagnostics ?: return@LaunchedEffect
-        val send = Intent(Intent.ACTION_SEND).apply {
-            type = "text/plain"
-            putExtra(Intent.EXTRA_SUBJECT, "Leserkonto Login-Diagnose")
-            putExtra(Intent.EXTRA_TEXT, report)
-        }
-        context.startActivity(Intent.createChooser(send, "Diagnose teilen"))
-        vm.consumeDiagnostics()
-    }
 
     Column(
         modifier = Modifier
@@ -461,6 +462,17 @@ fun SettingsScreen(state: UiState, vm: AppViewModel) {
             "Hinweis: Die App liest dein Konto direkt vom Bibliotheksportal aus. " +
                 "Eine automatische Verlängerung gelingt nur, wenn das Medium nicht " +
                 "vorgemerkt ist und das Verlängerungslimit nicht erreicht wurde.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        Spacer(Modifier.height(16.dp))
+        OutlinedButton(onClick = { vm.diagnose("", "") }, enabled = !state.loading) {
+            Text("Medien-Diagnose erstellen & teilen")
+        }
+        Text(
+            "Erstellt einen technischen Bericht der Kontoseite (Ausleih-Tabelle) " +
+                "zur Verbesserung der Medien-Anzeige. Kann persönliche Kontodaten enthalten.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
