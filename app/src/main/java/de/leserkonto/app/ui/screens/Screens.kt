@@ -47,6 +47,7 @@ import android.net.Uri
 import android.os.PowerManager
 import android.provider.Settings
 import android.view.autofill.AutofillManager
+import de.leserkonto.app.BuildConfig
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -538,6 +539,13 @@ fun SettingsScreen(state: UiState, vm: AppViewModel) {
         Text(
             "Erstellt einen technischen Bericht der Kontoseite (Ausleih-Tabelle) " +
                 "zur Verbesserung der Medien-Anzeige. Kann persönliche Kontodaten enthalten.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        Spacer(Modifier.height(16.dp))
+        Text(
+            "Leserkonto · Version ${BuildConfig.VERSION_NAME} (Build ${BuildConfig.VERSION_CODE})",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

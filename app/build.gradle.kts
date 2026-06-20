@@ -14,7 +14,7 @@ android {
         // CI passes a monotonically increasing code (the run number) so each
         // published build is recognised as an update; falls back to 1 locally.
         versionCode = System.getenv("VERSION_CODE")?.toIntOrNull() ?: 1
-        versionName = "1.0"
+        versionName = System.getenv("VERSION_NAME") ?: "1.0-dev"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
@@ -54,6 +54,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.14"

@@ -9,6 +9,11 @@ on:
 permissions:
   contents: write
 
+env:
+  APP_NAME: Leserkonto
+  VERSION_NAME: "1.0.${{ github.run_number }}"
+  VERSION_CODE: ${{ github.run_number }}
+
 jobs:
   build:
     name: Build & Test
@@ -34,30 +39,37 @@ jobs:
         run: ./gradlew test --stacktrace
 
       - name: Assemble debug APK
-        env:
-          VERSION_CODE: ${{ github.run_number }}
         run: ./gradlew assembleDebug --stacktrace
 
-      - name: Upload debug APK (workflow artifact)
+      - name: Rename APK to "<App>-<version>.apk"
+        run: |
+          set -e
+          SRC=$(find app/build/outputs/apk/debug -name '*.apk' | head -n1)
+          DEST="${APP_NAME}-${VERSION_NAME}.apk"
+          cp "$SRC" "$DEST"
+          echo "APK_FILE=$DEST" >> "$GITHUB_ENV"
+
+      - name: Upload APK (workflow artifact)
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug
-          path: app/build/outputs/apk/debug/*.apk
+          name: ${{ env.APK_FILE }}
+          path: ${{ env.APK_FILE }}
           if-no-files-found: warn
 
-      # Publish a stable, direct .apk download link via a rolling pre-release.
-      # Runs only on main and the active development branch.
-      - name: Publish debug APK as rolling release
+      # Publish a rolling pre-release whose single asset is named with the app
+      # name + version. The release page URL stays stable; the asset filename
+      # carries the version. Delete+recreate keeps only the newest APK attached.
+      - name: Publish versioned APK to rolling release
         if: >-
           github.ref == 'refs/heads/main' ||
           github.ref == 'refs/heads/claude/library-account-android-app-5oya8z'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: debug-latest
-          name: "Debug APK (latest build)"
-          body: |
-            Automatisch gebaute Debug-Version zum Testen auf dem Handy.
-            Direkt-Download: app-debug.apk (unten unter "Assets").
-            Commit: ${{ github.sha }}
-          prerelease: true
-          files: app/build/outputs/apk/debug/*.apk
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          gh release delete debug-latest --yes --cleanup-tag || true
+          gh release create debug-latest "$APK_FILE" \
+            --target "${{ github.sha }}" \
+            --title "${APP_NAME} ${VERSION_NAME}" \
+            --prerelease \
+            --notes "Automatisch gebaute Debug-Version. Datei: ${APK_FILE}. Commit: ${{ github.sha }}"
