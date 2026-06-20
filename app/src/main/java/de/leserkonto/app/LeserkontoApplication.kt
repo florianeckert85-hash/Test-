@@ -30,6 +30,7 @@ class LeserkontoApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        CrashLog.install(this)
         container = AppContainer(this)
         container.notificationHelper.ensureChannel()
         // Keep the daily sync scheduled whenever the app has been opened.

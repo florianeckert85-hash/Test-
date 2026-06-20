@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import de.leserkonto.app.AppContainer
+import de.leserkonto.app.CrashLog
 import de.leserkonto.app.data.AccountRepository
 import de.leserkonto.app.data.model.AccountData
 import de.leserkonto.app.data.model.Loan
@@ -88,6 +89,16 @@ class AppViewModel(
     }
 
     fun consumeDiagnostics() = _state.update { it.copy(diagnostics = null) }
+
+    /** Shares the last captured crash report (if any) via the share sheet. */
+    fun shareLastCrash() {
+        val report = CrashLog.read(appContext)
+        if (report.isNullOrBlank()) {
+            _state.update { it.copy(error = "Kein Absturzbericht vorhanden.") }
+        } else {
+            _state.update { it.copy(diagnostics = "=== ABSTURZBERICHT ===\n$report") }
+        }
+    }
 
     fun logout() {
         SyncScheduler.cancel(appContext)

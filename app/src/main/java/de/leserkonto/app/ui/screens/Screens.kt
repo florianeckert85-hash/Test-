@@ -9,7 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -195,6 +195,9 @@ fun LoginScreen(state: UiState, vm: AppViewModel) {
         ) {
             Text("Anmeldung schlägt fehl? Diagnose erstellen & teilen")
         }
+        TextButton(onClick = { vm.shareLastCrash() }) {
+            Text("Letzten Absturz-Bericht teilen")
+        }
         Text(
             "Erstellt einen technischen Bericht der Login-Seite zum Teilen. " +
                 "Das Passwort wird nicht aufgenommen; bei erfolgreichem Login können " +
@@ -318,7 +321,9 @@ fun AccountScreen(state: UiState, vm: AppViewModel) {
                     }
                 }
             }
-            items(loans, key = { it.id ?: it.title }) { loan ->
+            // Index-based keys: titles can repeat, and duplicate LazyColumn keys
+            // crash the app, so we deliberately do not key by id/title.
+            itemsIndexed(loans) { _, loan ->
                 LoanCard(loan, isRenewing = state.renewingId == (loan.id ?: loan.title)) {
                     vm.renew(loan)
                 }

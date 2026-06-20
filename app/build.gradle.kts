@@ -11,14 +11,31 @@ android {
         applicationId = "de.leserkonto.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
+        // CI passes a monotonically increasing code (the run number) so each
+        // published build is recognised as an update; falls back to 1 locally.
+        versionCode = System.getenv("VERSION_CODE")?.toIntOrNull() ?: 1
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
     }
 
+    // A fixed, committed debug keystore so every CI build is signed with the
+    // same key. Without this, each runner generates a new key and Android
+    // refuses to update the app ("App nicht installiert").
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("keystore/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("debug")
+        }
         release {
             isMinifyEnabled = true
             proguardFiles(
