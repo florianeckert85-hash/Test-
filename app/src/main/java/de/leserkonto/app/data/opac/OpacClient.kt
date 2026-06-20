@@ -32,4 +32,13 @@ interface OpacClient {
      * can be verified/tuned against the real site.
      */
     suspend fun captureAccountHtml(username: String, password: String): OpacResult<String>
+
+    /**
+     * Diagnostic helper: probes the login page, reports which form/fields were
+     * detected, optionally attempts a login with the given credentials and
+     * reports the outcome. Returns a human-readable report (no password is
+     * included) used to tune the login/scraping heuristics against the real
+     * site. Credentials may be blank to only inspect the login page.
+     */
+    suspend fun diagnoseLogin(username: String, password: String): OpacResult<String>
 }

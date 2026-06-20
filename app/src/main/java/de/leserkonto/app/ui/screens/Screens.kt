@@ -40,8 +40,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import android.content.Intent
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
@@ -68,6 +70,20 @@ fun LeserkontoApp(state: UiState, vm: AppViewModel) {
 fun LoginScreen(state: UiState, vm: AppViewModel) {
     var user by remember { mutableStateOf("") }
     var pass by remember { mutableStateOf("") }
+    val context = LocalContext.current
+
+    // When a diagnostic report is ready, open the system share sheet so the
+    // user can send it (e.g. by email) for troubleshooting the login.
+    LaunchedEffect(state.diagnostics) {
+        val report = state.diagnostics ?: return@LaunchedEffect
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, "Leserkonto Login-Diagnose")
+            putExtra(Intent.EXTRA_TEXT, report)
+        }
+        context.startActivity(Intent.createChooser(send, "Diagnose teilen"))
+        vm.consumeDiagnostics()
+    }
 
     Column(
         modifier = Modifier
@@ -127,6 +143,21 @@ fun LoginScreen(state: UiState, vm: AppViewModel) {
                 Text("Anmelden & speichern")
             }
         }
+
+        Spacer(Modifier.height(8.dp))
+        TextButton(
+            onClick = { vm.diagnose(user.trim(), pass) },
+            enabled = !state.loading,
+        ) {
+            Text("Anmeldung schlägt fehl? Diagnose erstellen & teilen")
+        }
+        Text(
+            "Erstellt einen technischen Bericht der Login-Seite zum Teilen. " +
+                "Das Passwort wird nicht aufgenommen; bei erfolgreichem Login können " +
+                "aber Kontodaten enthalten sein.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

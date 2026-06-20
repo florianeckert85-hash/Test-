@@ -105,6 +105,82 @@ class BibliothecaOpenClient(
             accountDoc.outerHtml()
         }
 
+    override suspend fun diagnoseLogin(username: String, password: String): OpacResult<String> =
+        runCatchingIo { buildDiagnosticReport(username, password) }
+
+    /**
+     * Builds a human-readable diagnostic report of the login page and (if
+     * credentials are supplied) the result of an actual login attempt. The
+     * password is never written to the report; the user's own account text may
+     * appear if the login succeeds, so the UI warns before sharing.
+     */
+    private fun buildDiagnosticReport(username: String, password: String): String {
+        val sb = StringBuilder()
+        sb.appendLine("=== Leserkonto Login-Diagnose ===")
+        sb.appendLine("Bibliothek: ${config.baseUrl}/${config.branch}")
+        sb.appendLine("Account-URL: ${config.accountUrl}")
+        sb.appendLine()
+
+        val (status, finalUrl, body) = getRaw(config.accountUrl)
+        sb.appendLine("GET Account-Seite -> HTTP $status")
+        sb.appendLine("Final-URL: $finalUrl")
+        sb.appendLine("Antwort-Größe: ${body.length} Zeichen")
+
+        val doc = Jsoup.parse(body, finalUrl)
+        sb.appendLine("Seitentitel: ${doc.title()}")
+        sb.appendLine("Bereits eingeloggt erkannt: ${isLoggedIn(doc)}")
+        sb.appendLine()
+
+        val forms = doc.select("form")
+        sb.appendLine("Gefundene <form>-Elemente: ${forms.size}")
+        forms.forEachIndexed { i, f ->
+            sb.appendLine(
+                "  Form #$i  action='${f.attr("action")}' method='${f.attr("method")}' " +
+                    "id='${f.attr("id")}' name='${f.attr("name")}'"
+            )
+            for (inp in f.select("input, select, textarea")) {
+                sb.appendLine(
+                    "      ${inp.tagName()} type='${inp.attr("type")}' name='${inp.attr("name")}' " +
+                        "id='${inp.attr("id")}' placeholder='${inp.attr("placeholder")}'"
+                )
+            }
+        }
+        sb.appendLine()
+
+        val loginForm = findLoginForm(doc)
+        sb.appendLine("Login-Formular erkannt: ${loginForm != null}")
+        if (loginForm != null) {
+            val pwName = loginForm.select("input[type=password]").firstOrNull()?.attr("name")
+            sb.appendLine("  Passwortfeld-Name: '$pwName'")
+            sb.appendLine("  Erkanntes Benutzerfeld: '${guessUserField(loginForm, pwName ?: "")}'")
+        }
+        sb.appendLine()
+
+        if (loginForm != null && username.isNotBlank() && password.isNotBlank()) {
+            sb.appendLine("--- Login-Versuch mit eingegebenen Daten ---")
+            val after = performLogin(doc, username, password)
+            if (after == null) {
+                sb.appendLine("Kein POST möglich (Benutzer-/Passwortfeld nicht bestimmbar).")
+            } else {
+                val text = after.text().lowercase()
+                sb.appendLine("Eingeloggt erkannt: ${isLoggedIn(after)}")
+                sb.appendLine("Passwortfeld danach noch vorhanden: ${after.select("input[type=password]").isNotEmpty()}")
+                sb.appendLine("Enthält 'abmelden/logout': ${listOf("abmelden", "logout", "ausloggen").any { text.contains(it) }}")
+                sb.appendLine("Generierte Fehlermeldung: ${loginErrorMessage(after)}")
+                sb.appendLine("--- Sichtbarer Text nach Login (Ausschnitt) ---")
+                sb.appendLine(after.text().take(1500))
+                sb.appendLine("--- HTML nach Login (Ausschnitt) ---")
+                sb.appendLine(after.outerHtml().take(20000))
+            }
+        } else {
+            sb.appendLine("(Kein Login-Versuch – Felder leer oder kein Login-Formular.)")
+        }
+        sb.appendLine()
+        sb.appendLine("=== HTML der Login-Seite (Ausschnitt) ===")
+        sb.appendLine(doc.outerHtml().take(20000))
+        return sb.toString()
+    }
+
     // ---------------------------------------------------------------- internals
 
     /** Ensures we are logged in and returns the account page document. */
@@ -237,6 +313,16 @@ class BibliothecaOpenClient(
         http.newCall(req).execute().use { resp ->
             val body = resp.body?.string().orEmpty()
             return Jsoup.parse(body, resp.request.url.toString())
+        }
+    }
+
+    /** Like [getDoc] but exposes status code, final URL and raw body for diagnostics. */
+    private fun getRaw(url: String): Triple<Int, String, String> {
+        val req = Request.Builder().url(url).apply {
+            browserHeaders.forEach { (k, v) -> header(k, v) }
+        }.build()
+        http.newCall(req).execute().use { resp ->
+            return Triple(resp.code, resp.request.url.toString(), resp.body?.string().orEmpty())
         }
     }
 

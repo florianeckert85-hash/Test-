@@ -26,6 +26,8 @@ data class UiState(
     val message: String? = null,
     val renewingId: String? = null,
     val settings: SettingsStore.Settings = SettingsStore.Settings(),
+    /** One-shot diagnostic report to be shared via the system share sheet. */
+    val diagnostics: String? = null,
 )
 
 class AppViewModel(
@@ -65,6 +67,21 @@ class AppViewModel(
             }
         }
     }
+
+    /** Runs a login-page diagnosis and exposes the report for sharing. */
+    fun diagnose(username: String, password: String) {
+        _state.update { it.copy(loading = true, error = null) }
+        viewModelScope.launch {
+            when (val r = repo.diagnose(username.trim(), password)) {
+                is OpacResult.Success ->
+                    _state.update { it.copy(loading = false, diagnostics = r.value) }
+                is OpacResult.Error ->
+                    _state.update { it.copy(loading = false, error = "Diagnose fehlgeschlagen: ${r.message}") }
+            }
+        }
+    }
+
+    fun consumeDiagnostics() = _state.update { it.copy(diagnostics = null) }
 
     fun logout() {
         repo.logout()

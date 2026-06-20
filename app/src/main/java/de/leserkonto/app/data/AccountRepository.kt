@@ -61,4 +61,8 @@ class AccountRepository(
         val pass = credentials.password ?: return OpacResult.Error("Keine Zugangsdaten gespeichert")
         return client.captureAccountHtml(user, pass)
     }
+
+    /** Diagnostic probe of the login page; credentials are taken as typed (may be blank). */
+    suspend fun diagnose(username: String, password: String): OpacResult<String> =
+        client.diagnoseLogin(username, password)
 }
