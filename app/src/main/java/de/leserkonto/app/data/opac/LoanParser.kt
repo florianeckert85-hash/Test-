@@ -49,14 +49,14 @@ object LoanParser {
      * is card-based, fall back to the smallest block elements that contain a date.
      */
     private fun candidateRows(doc: Document): List<Element> {
-        val tableRows = doc.select("tr").filter { it.containsDate() && it.select("th").isEmpty() }
+        val tableRows = doc.select("tr").toList().filter { it.containsDate() && it.select("th").isEmpty() }
         if (tableRows.isNotEmpty()) return tableRows
 
         // Card / list layout: take leaf-ish blocks that contain a date but whose
         // children don't individually contain *the same* amount of detail.
         val blocks = doc.select(
             "li, div.account-item, div.loan, div.medium, div.row, article, div[class*=item]"
-        ).filter { it.containsDate() }
+        ).toList().filter { it.containsDate() }
 
         // Keep only the innermost matching blocks to avoid counting an item twice.
         return blocks.filter { block ->

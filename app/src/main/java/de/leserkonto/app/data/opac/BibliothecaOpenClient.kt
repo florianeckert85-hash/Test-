@@ -148,7 +148,7 @@ class BibliothecaOpenClient(
     private fun guessUserField(form: FormElement, passwordName: String): String? {
         val candidates = form.select(
             "input[type=text], input[type=number], input[type=email], input[type=tel], input:not([type])"
-        ).filter { it.attr("name").isNotBlank() && it.attr("type") != "hidden" }
+        ).toList().filter { it.attr("name").isNotBlank() && it.attr("type") != "hidden" }
         // Prefer a field whose name/id hints at a user/card number.
         val hinted = candidates.firstOrNull {
             val key = (it.attr("name") + " " + it.attr("id") + " " + it.attr("placeholder")).lowercase()
@@ -176,7 +176,8 @@ class BibliothecaOpenClient(
         val checkboxes = form.select("input[type=checkbox]")
         var ticked = 0
         for (cb in checkboxes) {
-            val name = cb.attr("name").ifBlank { continue }
+            val name = cb.attr("name")
+            if (name.isBlank()) continue
             val value = cb.attr("value").ifBlank { "on" }
             val matches = onlyId == null || value == onlyId || name == onlyId
             if (matches) { data[name] = value; ticked++ }
