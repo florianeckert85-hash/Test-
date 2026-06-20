@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Leserkonto</string>
+
+    <string name="notif_channel_name">Fälligkeits-Erinnerungen</string>
+    <string name="notif_channel_desc">Erinnert, wenn ausgeliehene Medien bald zurückgegeben werden müssen.</string>
+
+    <string name="notif_due_title">%1$d Medien bald fällig</string>
+    <string name="notif_autorenew_title">Automatisch verlängert</string>
+    <string name="notif_autorenew_text">%1$d Medien wurden automatisch verlängert.</string>
+
+    <string name="due_today">heute fällig</string>
+    <string name="due_in_days">fällig in %1$d Tagen</string>
+    <string name="due_overdue">überfällig seit %1$d Tagen</string>
+</resources>
