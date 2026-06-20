@@ -212,10 +212,26 @@ class BibliothecaOpenClient(
         return postForm(form, data)
     }
 
-    /** A login form is the one that contains a password input. */
+    /**
+     * Finds the actual *login* form. A login form has exactly one password field
+     * plus a visible identifier field (card number / user name). This deliberately
+     * excludes "PIN/Passwort ändern" forms on the logged-in account page (which
+     * carry several password fields and no card-number field), so their presence
+     * is not mistaken for "not logged in".
+     */
     private fun findLoginForm(doc: Document): FormElement? =
-        doc.select("form").filterIsInstance<FormElement>()
-            .firstOrNull { it.select("input[type=password]").isNotEmpty() }
+        doc.select("form").filterIsInstance<FormElement>().firstOrNull { isLoginForm(it) }
+
+    private fun isLoginForm(form: FormElement): Boolean {
+        // A change-password form has 2-3 password fields; a login has exactly one.
+        if (form.select("input[type=password]").size != 1) return false
+        // Must also offer a non-password identifier input (the card number).
+        return form.select("input").any {
+            val type = it.attr("type").lowercase()
+            it.attr("name").isNotBlank() &&
+                type !in listOf("password", "hidden", "submit", "button", "checkbox", "radio", "image", "reset")
+        }
+    }
 
     /**
      * The username field is the visible text/number/email/tel input that comes
@@ -380,9 +396,18 @@ class BibliothecaOpenClient(
 
     private fun isLoggedIn(doc: Document): Boolean {
         val t = doc.text().lowercase()
-        val hasLogout = listOf("abmelden", "logout", "ausloggen").any { t.contains(it) }
-        val stillHasLogin = doc.select("input[type=password]").isNotEmpty()
-        return hasLogout && !stillHasLogin
+        // Strongest signal: an explicit logout control.
+        val hasLogout = listOf("abmelden", "logout", "ausloggen", "abmeldung").any { t.contains(it) }
+        if (hasLogout) return true
+        // Otherwise: we are logged in if the page shows account content and there
+        // is no real login form on it. (A "PIN ändern" password field no longer
+        // counts as a login form — see [isLoginForm].)
+        val accountMarkers = listOf(
+            "entliehene medien", "ausleihen", "entliehen", "rückgabe", "rückgabedatum",
+            "verlängerbar", "verlängern", "vormerkung", "vorgemerkt", "gebühren", "leihfrist",
+        )
+        val looksLikeAccount = accountMarkers.any { t.contains(it) }
+        return looksLikeAccount && findLoginForm(doc) == null
     }
 
     private fun loginErrorMessage(doc: Document): String {
