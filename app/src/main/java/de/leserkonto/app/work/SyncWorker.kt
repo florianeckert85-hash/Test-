@@ -22,7 +22,7 @@ class SyncWorker(
 
     override suspend fun doWork(): Result {
         val repo = container.accountRepository
-        if (!repo.hasCredentials) return Result.success()
+        if (!repo.hasCredentials()) return Result.success()
 
         val settings = container.settingsStore.settings.first()
 

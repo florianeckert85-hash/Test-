@@ -36,14 +36,20 @@ class AppViewModel(
     private val appContext: Context,
 ) : ViewModel() {
 
-    private val _state = MutableStateFlow(UiState(loggedIn = repo.hasCredentials))
+    private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state.asStateFlow()
 
     init {
         viewModelScope.launch {
             settingsStore.settings.collect { s -> _state.update { it.copy(settings = s) } }
         }
-        if (repo.hasCredentials) refresh()
+        // Credential check runs off the main thread (Keystore) inside the repo.
+        viewModelScope.launch {
+            if (repo.hasCredentials()) {
+                _state.update { it.copy(loggedIn = true) }
+                refresh()
+            }
+        }
     }
 
     // ----------------------------------------------------------------- login
@@ -84,9 +90,9 @@ class AppViewModel(
     fun consumeDiagnostics() = _state.update { it.copy(diagnostics = null) }
 
     fun logout() {
-        repo.logout()
         SyncScheduler.cancel(appContext)
         _state.update { UiState(loggedIn = false, settings = it.settings) }
+        viewModelScope.launch { repo.logout() }
     }
 
     // --------------------------------------------------------------- account

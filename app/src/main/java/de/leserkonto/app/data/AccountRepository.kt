@@ -13,6 +13,9 @@ import kotlinx.coroutines.flow.asStateFlow
  * Single source of truth for the reader account. Combines the stored
  * credentials with the [OpacClient] and caches the last successful snapshot in
  * memory so the UI (and the background worker) share one consistent state.
+ *
+ * All credential access is suspend (runs off the main thread inside
+ * [CredentialStore]) to avoid Keystore-induced ANRs.
  */
 class AccountRepository(
     private val client: OpacClient,
@@ -21,12 +24,12 @@ class AccountRepository(
     private val _account = MutableStateFlow<AccountData?>(null)
     val account: StateFlow<AccountData?> = _account.asStateFlow()
 
-    val hasCredentials: Boolean get() = credentials.hasCredentials
+    suspend fun hasCredentials(): Boolean = credentials.hasCredentials()
 
-    fun saveCredentials(username: String, password: String) =
+    suspend fun saveCredentials(username: String, password: String) =
         credentials.save(username, password)
 
-    fun logout() {
+    suspend fun logout() {
         credentials.clear()
         _account.value = null
     }
@@ -37,28 +40,28 @@ class AccountRepository(
 
     /** Refreshes the account from the OPAC and caches it. */
     suspend fun refresh(): OpacResult<AccountData> {
-        val user = credentials.username ?: return OpacResult.Error("Keine Zugangsdaten gespeichert")
-        val pass = credentials.password ?: return OpacResult.Error("Keine Zugangsdaten gespeichert")
+        val user = credentials.username() ?: return OpacResult.Error("Keine Zugangsdaten gespeichert")
+        val pass = credentials.password() ?: return OpacResult.Error("Keine Zugangsdaten gespeichert")
         val result = client.loadAccount(user, pass)
         if (result is OpacResult.Success) _account.value = result.value
         return result
     }
 
     suspend fun renew(loan: Loan): OpacResult<Unit> {
-        val user = credentials.username ?: return OpacResult.Error("Keine Zugangsdaten gespeichert")
-        val pass = credentials.password ?: return OpacResult.Error("Keine Zugangsdaten gespeichert")
+        val user = credentials.username() ?: return OpacResult.Error("Keine Zugangsdaten gespeichert")
+        val pass = credentials.password() ?: return OpacResult.Error("Keine Zugangsdaten gespeichert")
         return client.renew(user, pass, loan)
     }
 
     suspend fun renewAll(): OpacResult<Unit> {
-        val user = credentials.username ?: return OpacResult.Error("Keine Zugangsdaten gespeichert")
-        val pass = credentials.password ?: return OpacResult.Error("Keine Zugangsdaten gespeichert")
+        val user = credentials.username() ?: return OpacResult.Error("Keine Zugangsdaten gespeichert")
+        val pass = credentials.password() ?: return OpacResult.Error("Keine Zugangsdaten gespeichert")
         return client.renewAll(user, pass)
     }
 
     suspend fun captureHtml(): OpacResult<String> {
-        val user = credentials.username ?: return OpacResult.Error("Keine Zugangsdaten gespeichert")
-        val pass = credentials.password ?: return OpacResult.Error("Keine Zugangsdaten gespeichert")
+        val user = credentials.username() ?: return OpacResult.Error("Keine Zugangsdaten gespeichert")
+        val pass = credentials.password() ?: return OpacResult.Error("Keine Zugangsdaten gespeichert")
         return client.captureAccountHtml(user, pass)
     }
 

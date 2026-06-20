@@ -10,6 +10,9 @@ import de.leserkonto.app.data.store.CredentialStore
 import de.leserkonto.app.data.store.SettingsStore
 import de.leserkonto.app.work.NotificationHelper
 import de.leserkonto.app.work.SyncScheduler
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 /** Minimal manual DI container — created once and shared across the app. */
 class AppContainer(context: Context) {
@@ -30,8 +33,11 @@ class LeserkontoApplication : Application() {
         container = AppContainer(this)
         container.notificationHelper.ensureChannel()
         // Keep the daily sync scheduled whenever the app has been opened.
-        if (container.credentialStore.hasCredentials) {
-            SyncScheduler.schedule(this)
+        // Credential check touches the Keystore, so run it off the main thread.
+        CoroutineScope(Dispatchers.IO).launch {
+            if (container.credentialStore.hasCredentials()) {
+                SyncScheduler.schedule(this@LeserkontoApplication)
+            }
         }
     }
 }
