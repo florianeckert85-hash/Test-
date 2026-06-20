@@ -2,9 +2,12 @@ name: Android CI
 
 on:
   push:
-    branches: [main]
-  pull_request:
     branches: ["**"]
+  workflow_dispatch:
+
+# Needed so the build can publish the APK as a GitHub Release.
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -33,9 +36,26 @@ jobs:
       - name: Assemble debug APK
         run: ./gradlew assembleDebug --stacktrace
 
-      - name: Upload debug APK
+      - name: Upload debug APK (workflow artifact)
         uses: actions/upload-artifact@v4
         with:
           name: app-debug
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: warn
+
+      # Publish a stable, direct .apk download link via a rolling pre-release.
+      # Runs only on main and the active development branch.
+      - name: Publish debug APK as rolling release
+        if: >-
+          github.ref == 'refs/heads/main' ||
+          github.ref == 'refs/heads/claude/library-account-android-app-5oya8z'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: debug-latest
+          name: "Debug APK (latest build)"
+          body: |
+            Automatisch gebaute Debug-Version zum Testen auf dem Handy.
+            Direkt-Download: app-debug.apk (unten unter "Assets").
+            Commit: ${{ github.sha }}
+          prerelease: true
+          files: app/build/outputs/apk/debug/*.apk
