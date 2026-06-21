@@ -317,6 +317,11 @@ class BibliothecaOpenClient(
         // __doPostBack target (BtnExtendThis), carried in Loan.id.
         if (onlyId != null && (onlyId.contains("doPostBack") || onlyId.contains("Extend", true) || onlyId.contains('$'))) {
             val data = collectFormData(form)
+            // Drop any pre-selected loan checkboxes so ONLY the targeted item is
+            // renewed (otherwise a checked box could renew extra items).
+            data.keys
+                .filter { it.contains("chkSelect", true) || it.contains("chkAllLoans", true) }
+                .forEach { data.remove(it) }
             data["__EVENTTARGET"] = onlyId
             data["__EVENTARGUMENT"] = ""
             val result = postForm(form, data) ?: return false
