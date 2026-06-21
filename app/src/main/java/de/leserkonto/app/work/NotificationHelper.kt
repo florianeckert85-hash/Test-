@@ -74,6 +74,42 @@ class NotificationHelper(private val context: Context) {
         NotificationManagerCompat.from(context).notify(NOTIF_ID, notification)
     }
 
+    /** Posts a warning when the automatic renewal could not renew some items. */
+    fun notifyAutoRenewFailed(failed: List<Loan>) {
+        if (failed.isEmpty() || !canPost()) return
+        ensureChannel()
+
+        val title = if (failed.size == 1) {
+            "Automatische Verlängerung nicht möglich"
+        } else {
+            "${failed.size} Verlängerungen nicht möglich"
+        }
+        val lines = failed.take(6).map { "• ${it.title}" }
+        val style = NotificationCompat.InboxStyle().setBigContentTitle(title)
+        lines.forEach { style.addLine(it) }
+
+        val intent = Intent(context, MainActivity::class.java)
+            .setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        val pi = PendingIntent.getActivity(
+            context, 2, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_dialog_alert)
+            .setContentTitle(title)
+            .setContentText(
+                (lines.firstOrNull().orEmpty()) +
+                    " – bitte ggf. manuell verlängern (z. B. vorgemerkt oder Limit erreicht).",
+            )
+            .setStyle(style)
+            .setAutoCancel(true)
+            .setContentIntent(pi)
+            .build()
+
+        NotificationManagerCompat.from(context).notify(NOTIF_ID + 2, notification)
+    }
+
     /** Posts a short confirmation after an automatic renewal ran. */
     fun notifyAutoRenewed(count: Int) {
         if (count <= 0 || !canPost()) return

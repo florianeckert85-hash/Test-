@@ -40,14 +40,28 @@ class SyncWorker(
             val dueForRenew = account.loans.filter { loan ->
                 loan.renewable && (loan.daysUntilDue()?.let { it <= threshold } == true)
             }
+            val previouslyReportedFail = container.settingsStore.renewFailMarkers()
+            val stillFailing = mutableSetOf<String>()
+            val newlyFailed = mutableListOf<Loan>()
             for (loan in dueForRenew) {
-                if (repo.renew(loan) is OpacResult.Success) renewedCount++
+                if (repo.renew(loan) is OpacResult.Success) {
+                    renewedCount++
+                } else {
+                    val marker = "${loan.title}|${loan.dueDate}"
+                    stillFailing.add(marker)
+                    if (marker !in previouslyReportedFail) newlyFailed.add(loan)
+                }
             }
             if (renewedCount > 0) {
                 // Re-fetch so the reminder below reflects the new due dates.
                 (repo.refresh() as? OpacResult.Success)?.let { /* cache updated */ }
                 container.notificationHelper.notifyAutoRenewed(renewedCount)
             }
+            // Report each failed item once; prune markers of items that no longer fail.
+            if (newlyFailed.isNotEmpty()) {
+                container.notificationHelper.notifyAutoRenewFailed(newlyFailed)
+            }
+            container.settingsStore.replaceRenewFailMarkers(stillFailing)
         }
 
         // 3) Multi-stage reminders: notify once per crossed stage, per item.

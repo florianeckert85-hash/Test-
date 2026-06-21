@@ -67,6 +67,14 @@ class SettingsStore(private val context: Context) {
     suspend fun replaceNotifiedMarkers(markers: Set<String>) =
         context.dataStore.edit { it[NOTIFIED_MARKERS] = markers }
 
+    // --- markers for already-reported auto-renew failures (so they notify once) ---
+
+    suspend fun renewFailMarkers(): Set<String> =
+        context.dataStore.data.first()[RENEW_FAIL_MARKERS] ?: emptySet()
+
+    suspend fun replaceRenewFailMarkers(markers: Set<String>) =
+        context.dataStore.edit { it[RENEW_FAIL_MARKERS] = markers }
+
     companion object {
         val DEFAULT_REMINDER_OFFSETS = setOf(3, 1, 0)
         const val DEFAULT_AUTO_RENEW_OFFSET = 2
@@ -81,5 +89,6 @@ class SettingsStore(private val context: Context) {
         private val AUTO_RENEW_OFFSET = intPreferencesKey("auto_renew_day_offset")
         private val NOTIFICATIONS = booleanPreferencesKey("notifications_enabled")
         private val NOTIFIED_MARKERS = stringSetPreferencesKey("reminder_notified_markers")
+        private val RENEW_FAIL_MARKERS = stringSetPreferencesKey("renew_fail_markers")
     }
 }
