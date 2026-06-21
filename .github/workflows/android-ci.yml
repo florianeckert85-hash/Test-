@@ -67,9 +67,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
+          # Release notes = the last few commit subjects (no trailers).
+          NOTES=$(git log -8 --no-merges --pretty=format:'- %s')
+          BODY=$(printf 'Automatisch gebaute Debug-Version.\nDatei: %s\n\nLetzte Änderungen:\n%s\n\nCommit: %s' \
+            "$APK_FILE" "$NOTES" "${{ github.sha }}")
           gh release delete debug-latest --yes --cleanup-tag || true
           gh release create debug-latest "$APK_FILE" \
             --target "${{ github.sha }}" \
             --title "${APP_NAME} ${VERSION_NAME}" \
             --prerelease \
-            --notes "Automatisch gebaute Debug-Version. Datei: ${APK_FILE}. Commit: ${{ github.sha }}"
+            --notes "$BODY"

@@ -498,12 +498,12 @@ class BibliothecaOpenClient(
     private suspend inline fun <T> runCatchingIo(crossinline block: () -> T): OpacResult<T> =
         withContext(Dispatchers.IO) {
             try {
-                // Safety net: never let a stuck request/parse hang the UI forever.
-                val value = withTimeoutOrNull(45_000L) { block() }
-                    ?: return@withContext OpacResult.Error(
-                        "Zeitüberschreitung – der Bibliotheksserver antwortet nicht."
-                    )
-                OpacResult.Success(value)
+                // Wrap the result *inside* the timeout so withTimeoutOrNull's type
+                // parameter is OpacResult (a reference type), never Unit. Passing a
+                // Unit-returning block straight to withTimeoutOrNull throws
+                // "kotlin.Unit cannot be cast to java.lang.Void" (e.g. on renew).
+                withTimeoutOrNull(45_000L) { OpacResult.Success(block()) }
+                    ?: OpacResult.Error("Zeitüberschreitung – der Bibliotheksserver antwortet nicht.")
             } catch (e: OpacException) {
                 OpacResult.Error(e.message ?: "Unbekannter Fehler", e)
             } catch (e: Exception) {
