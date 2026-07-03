@@ -17,6 +17,7 @@ import okhttp3.Request
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.FormElement
+import java.time.LocalDate
 import java.util.concurrent.TimeUnit
 
 /**
@@ -85,8 +86,14 @@ class BibliothecaOpenClient(
         runCatchingIo {
             val accountDoc = authenticatedAccountDoc(username, password)
                 ?: return@runCatchingIo error("Nicht eingeloggt")
-            val ok = submitRenewal(accountDoc, onlyId = loan.id)
-            if (!ok) return@runCatchingIo error("Verlängerung wurde von der Bibliothek nicht bestätigt")
+            val before = loan.dueDate
+                ?: LoanParser.parse(accountDoc).firstOrNull { it.title.equals(loan.title, true) }?.dueDate
+            if (!submitRenewalPost(accountDoc, onlyId = loan.id))
+                return@runCatchingIo error("Verlängerung konnte nicht gesendet werden")
+            // Verify by re-reading the account: did this item's due date advance?
+            val after = getDoc(config.accountUrl)
+            if (!dueDateAdvanced(after, loan.title, before))
+                return@runCatchingIo error("Verlängerung nicht möglich (evtl. vorgemerkt oder Limit erreicht)")
             Unit
         }
 
@@ -94,8 +101,16 @@ class BibliothecaOpenClient(
         runCatchingIo {
             val accountDoc = authenticatedAccountDoc(username, password)
                 ?: return@runCatchingIo error("Nicht eingeloggt")
-            val ok = submitRenewal(accountDoc, onlyId = null)
-            if (!ok) return@runCatchingIo error("Verlängerung wurde von der Bibliothek nicht bestätigt")
+            val before = LoanParser.parse(accountDoc).associate { it.title to it.dueDate }
+            if (!submitRenewalPost(accountDoc, onlyId = null))
+                return@runCatchingIo error("Verlängerung konnte nicht gesendet werden")
+            val after = getDoc(config.accountUrl)
+            val anyAdvanced = LoanParser.parse(after).any { a ->
+                val b = before[a.title]
+                a.dueDate != null && b != null && a.dueDate.isAfter(b)
+            }
+            if (!anyAdvanced)
+                return@runCatchingIo error("Verlängerung wurde von der Bibliothek nicht bestätigt")
             Unit
         }
 
@@ -308,7 +323,9 @@ class BibliothecaOpenClient(
      * checkboxes and clicks the renew button. If [onlyId] is set, selects only
      * the matching checkbox.
      */
-    private fun submitRenewal(accountDoc: Document, onlyId: String?): Boolean {
+    /** Sends the renewal request. Returns whether the POST/GET was dispatched;
+     *  success is verified separately via the due-date change (see [renew]). */
+    private fun submitRenewalPost(accountDoc: Document, onlyId: String?): Boolean {
         val form = findRenewalForm(accountDoc)
             ?: (accountDoc.selectFirst("form") as? FormElement)
             ?: return false
@@ -324,8 +341,7 @@ class BibliothecaOpenClient(
                 .forEach { data.remove(it) }
             data["__EVENTTARGET"] = onlyId
             data["__EVENTARGUMENT"] = ""
-            val result = postForm(form, data) ?: return false
-            return renewalLooksConfirmed(result)
+            return postForm(form, data) != null
         }
 
         val data = collectFormData(form)
@@ -356,8 +372,7 @@ class BibliothecaOpenClient(
             }
         renewBtn?.let { if (it.attr("name").isNotBlank()) data[it.attr("name")] = it.attr("value").ifBlank { "1" } }
 
-        val result = postForm(form, data) ?: return false
-        return renewalLooksConfirmed(result)
+        return postForm(form, data) != null
     }
 
     private fun submitPerItemRenewLink(doc: Document, id: String): Boolean {
@@ -365,8 +380,21 @@ class BibliothecaOpenClient(
             val h = it.attr("href").lowercase()
             (h.contains("verläng") || h.contains("verlaeng") || h.contains("renew")) && h.contains(id.lowercase())
         } ?: return false
-        val result = getDoc(absolute(doc, link.attr("href")))
-        return renewalLooksConfirmed(result)
+        getDoc(absolute(doc, link.attr("href")))
+        return true
+    }
+
+    /**
+     * Success signal for a renewal: the item's due date is later than before.
+     * This is reliable, unlike text matching — the OPEN page always contains the
+     * label "Nicht verlängerbar:" in every row, which broke the old heuristic.
+     */
+    private fun dueDateAdvanced(doc: Document, title: String, before: LocalDate?): Boolean {
+        if (before == null) return true // nothing to compare → don't cry failure
+        val after = LoanParser.parse(doc)
+            .firstOrNull { it.title.equals(title, ignoreCase = true) }?.dueDate
+            ?: return true // item no longer listed → assume it went through
+        return after.isAfter(before)
     }
 
     private fun findRenewalForm(doc: Document): FormElement? {
@@ -378,15 +406,6 @@ class BibliothecaOpenClient(
                     listOf("verläng", "verlaeng", "renew").any { w -> l.contains(w) }
                 }
         }
-    }
-
-    private fun renewalLooksConfirmed(doc: Document): Boolean {
-        val t = doc.text().lowercase()
-        val positive = listOf("erfolgreich", "verlängert", "wurde verläng", "neue leihfrist", "neues rückgabe")
-        val negative = listOf("nicht möglich", "fehlgeschlagen", "nicht verläng", "vorgemerkt", "maximal")
-        if (negative.any { t.contains(it) } && positive.none { t.contains(it) }) return false
-        // If we got back a valid logged-in account page without an error, treat as success.
-        return positive.any { t.contains(it) } || isLoggedIn(doc)
     }
 
     // -------------------------------------------------------------- HTTP helpers
