@@ -88,11 +88,13 @@ class BibliothecaOpenClient(
                 ?: return@runCatchingIo error("Nicht eingeloggt")
             val before = loan.dueDate
                 ?: LoanParser.parse(accountDoc).firstOrNull { it.title.equals(loan.title, true) }?.dueDate
-            if (!submitRenewalPost(accountDoc, onlyId = loan.id))
-                return@runCatchingIo error("Verlängerung konnte nicht gesendet werden")
-            // Verify by re-reading the account: did this item's due date advance?
-            val after = getDoc(config.accountUrl)
-            if (!dueDateAdvanced(after, loan.title, before))
+            val response = submitRenewalRequest(accountDoc, onlyId = loan.id)
+                ?: return@runCatchingIo error("Verlängerung konnte nicht gesendet werden")
+            // Success = the item's due date advanced. Check the postback response
+            // (re-rendered immediately) and, as a fallback, a fresh account read.
+            val ok = dueDateAdvanced(response, loan.title, before) ||
+                dueDateAdvanced(getDoc(config.accountUrl), loan.title, before)
+            if (!ok)
                 return@runCatchingIo error("Verlängerung nicht möglich (evtl. vorgemerkt oder Limit erreicht)")
             Unit
         }
@@ -102,14 +104,11 @@ class BibliothecaOpenClient(
             val accountDoc = authenticatedAccountDoc(username, password)
                 ?: return@runCatchingIo error("Nicht eingeloggt")
             val before = LoanParser.parse(accountDoc).associate { it.title to it.dueDate }
-            if (!submitRenewalPost(accountDoc, onlyId = null))
-                return@runCatchingIo error("Verlängerung konnte nicht gesendet werden")
-            val after = getDoc(config.accountUrl)
-            val anyAdvanced = LoanParser.parse(after).any { a ->
-                val b = before[a.title]
-                a.dueDate != null && b != null && a.dueDate.isAfter(b)
-            }
-            if (!anyAdvanced)
+            val response = submitRenewalRequest(accountDoc, onlyId = null)
+                ?: return@runCatchingIo error("Verlängerung konnte nicht gesendet werden")
+            val ok = anyDueDateAdvanced(response, before) ||
+                anyDueDateAdvanced(getDoc(config.accountUrl), before)
+            if (!ok)
                 return@runCatchingIo error("Verlängerung wurde von der Bibliothek nicht bestätigt")
             Unit
         }
@@ -323,12 +322,13 @@ class BibliothecaOpenClient(
      * checkboxes and clicks the renew button. If [onlyId] is set, selects only
      * the matching checkbox.
      */
-    /** Sends the renewal request. Returns whether the POST/GET was dispatched;
-     *  success is verified separately via the due-date change (see [renew]). */
-    private fun submitRenewalPost(accountDoc: Document, onlyId: String?): Boolean {
+    /** Sends the renewal request and returns the server's response page (or null
+     *  if it could not be dispatched). Success is verified by the caller via the
+     *  due-date change. */
+    private fun submitRenewalRequest(accountDoc: Document, onlyId: String?): Document? {
         val form = findRenewalForm(accountDoc)
             ?: (accountDoc.selectFirst("form") as? FormElement)
-            ?: return false
+            ?: return null
 
         // OCLC OPEN / ASP.NET: a single item is renewed by firing its row's
         // __doPostBack target (BtnExtendThis), carried in Loan.id.
@@ -341,7 +341,7 @@ class BibliothecaOpenClient(
                 .forEach { data.remove(it) }
             data["__EVENTTARGET"] = onlyId
             data["__EVENTARGUMENT"] = ""
-            return postForm(form, data) != null
+            return postForm(form, data)
         }
 
         val data = collectFormData(form)
@@ -372,16 +372,15 @@ class BibliothecaOpenClient(
             }
         renewBtn?.let { if (it.attr("name").isNotBlank()) data[it.attr("name")] = it.attr("value").ifBlank { "1" } }
 
-        return postForm(form, data) != null
+        return postForm(form, data)
     }
 
-    private fun submitPerItemRenewLink(doc: Document, id: String): Boolean {
+    private fun submitPerItemRenewLink(doc: Document, id: String): Document? {
         val link = doc.select("a[href]").firstOrNull {
             val h = it.attr("href").lowercase()
             (h.contains("verläng") || h.contains("verlaeng") || h.contains("renew")) && h.contains(id.lowercase())
-        } ?: return false
-        getDoc(absolute(doc, link.attr("href")))
-        return true
+        } ?: return null
+        return getDoc(absolute(doc, link.attr("href")))
     }
 
     /**
@@ -396,6 +395,13 @@ class BibliothecaOpenClient(
             ?: return true // item no longer listed → assume it went through
         return after.isAfter(before)
     }
+
+    /** True if any item's due date advanced vs the [before] snapshot (renew all). */
+    private fun anyDueDateAdvanced(doc: Document, before: Map<String, LocalDate?>): Boolean =
+        LoanParser.parse(doc).any { a ->
+            val b = before[a.title]
+            a.dueDate != null && b != null && a.dueDate.isAfter(b)
+        }
 
     private fun findRenewalForm(doc: Document): FormElement? {
         val forms = doc.select("form").filterIsInstance<FormElement>()
