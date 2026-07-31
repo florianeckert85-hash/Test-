@@ -90,10 +90,13 @@ class BibliothecaOpenClient(
                 ?: LoanParser.parse(accountDoc).firstOrNull { it.title.equals(loan.title, true) }?.dueDate
             val response = submitRenewalRequest(accountDoc, onlyId = loan.id)
                 ?: return@runCatchingIo error("Verlängerung konnte nicht gesendet werden")
-            // Success = the item's due date advanced. Check the postback response
-            // (re-rendered immediately) and, as a fallback, a fresh account read.
-            val ok = dueDateAdvanced(response, loan.title, before) ||
-                dueDateAdvanced(getDoc(config.accountUrl), loan.title, before)
+            // Success = the item's due date advanced. Verify with retries (the
+            // server may need a moment) and, if it didn't take, acknowledge the
+            // confirmation popup and re-check.
+            var ok = verifySingleAdvanced(loan.title, before, response)
+            if (!ok) {
+                confirmExtensionPopup(response)?.let { ok = verifySingleAdvanced(loan.title, before, it) }
+            }
             if (!ok)
                 return@runCatchingIo error("Verlängerung nicht möglich (evtl. vorgemerkt oder Limit erreicht)")
             Unit
@@ -106,8 +109,10 @@ class BibliothecaOpenClient(
             val before = LoanParser.parse(accountDoc).associate { it.title to it.dueDate }
             val response = submitRenewalRequest(accountDoc, onlyId = null)
                 ?: return@runCatchingIo error("Verlängerung konnte nicht gesendet werden")
-            val ok = anyDueDateAdvanced(response, before) ||
-                anyDueDateAdvanced(getDoc(config.accountUrl), before)
+            var ok = verifyAnyAdvanced(before, response)
+            if (!ok) {
+                confirmExtensionPopup(response)?.let { ok = verifyAnyAdvanced(before, it) }
+            }
             if (!ok)
                 return@runCatchingIo error("Verlängerung wurde von der Bibliothek nicht bestätigt")
             Unit
@@ -388,12 +393,21 @@ class BibliothecaOpenClient(
      * This is reliable, unlike text matching — the OPEN page always contains the
      * label "Nicht verlängerbar:" in every row, which broke the old heuristic.
      */
-    private fun dueDateAdvanced(doc: Document, title: String, before: LocalDate?): Boolean {
-        if (before == null) return true // nothing to compare → don't cry failure
-        val after = LoanParser.parse(doc)
-            .firstOrNull { it.title.equals(title, ignoreCase = true) }?.dueDate
-            ?: return true // item no longer listed → assume it went through
-        return after.isAfter(before)
+    private fun dueDateOf(doc: Document, title: String): LocalDate? =
+        LoanParser.parse(doc).firstOrNull { it.title.equals(title, ignoreCase = true) }?.dueDate
+
+    /**
+     * Renewal success = the item's due date advanced. The server may need a
+     * moment, so check the immediate response and then re-read a few times.
+     */
+    private fun verifySingleAdvanced(title: String, before: LocalDate?, immediate: Document): Boolean {
+        if (before == null) return true
+        if (dueDateOf(immediate, title)?.isAfter(before) == true) return true
+        repeat(VERIFY_RETRIES) {
+            Thread.sleep(VERIFY_DELAY_MS)
+            if (dueDateOf(getDoc(config.accountUrl), title)?.isAfter(before) == true) return true
+        }
+        return false
     }
 
     /** True if any item's due date advanced vs the [before] snapshot (renew all). */
@@ -402,6 +416,42 @@ class BibliothecaOpenClient(
             val b = before[a.title]
             a.dueDate != null && b != null && a.dueDate.isAfter(b)
         }
+
+    private fun verifyAnyAdvanced(before: Map<String, LocalDate?>, immediate: Document): Boolean {
+        if (anyDueDateAdvanced(immediate, before)) return true
+        repeat(VERIFY_RETRIES) {
+            Thread.sleep(VERIFY_DELAY_MS)
+            if (anyDueDateAdvanced(getDoc(config.accountUrl), before)) return true
+        }
+        return false
+    }
+
+    /**
+     * Some OPEN templates require confirming a "Möchten Sie verlängern?" popup
+     * ([loansExtensionPopup]) after the renew click. If such a confirm button is
+     * present, post it (with the response's fresh VIEWSTATE) and return the
+     * resulting page; otherwise null. Only used as a fallback when the initial
+     * click did not advance the due date, so a working one-click renewal is
+     * never double-submitted.
+     */
+    private fun confirmExtensionPopup(doc: Document): Document? {
+        val form = doc.selectFirst("form") as? FormElement ?: return null
+        val btn = form.select("input[type=submit]").firstOrNull {
+            val n = it.attr("name")
+            n.contains("ExtensionPopup", true) && !n.contains("Cancel", true)
+        } ?: return null
+        val data = collectFormData(form)
+        data.keys
+            .filter { it.contains("chkSelect", true) || it.contains("chkAllLoans", true) }
+            .forEach { data.remove(it) }
+        data[btn.attr("name")] = btn.attr("value").ifBlank { "1" }
+        return postForm(form, data)
+    }
+
+    private companion object {
+        const val VERIFY_RETRIES = 3
+        const val VERIFY_DELAY_MS = 1200L
+    }
 
     private fun findRenewalForm(doc: Document): FormElement? {
         val forms = doc.select("form").filterIsInstance<FormElement>()
