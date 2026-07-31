@@ -1,0 +1,20 @@
+# Gradle / build
+.gradle/
+build/
+app/build/
+local.properties
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+.DS_Store
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Keystore / secrets
+*.jks
+*.keystore
+# ...except the throwaway DEBUG keystore, committed on purpose so every CI
+# build is signed with the same key (otherwise app updates fail to install).
+!app/keystore/debug.keystore

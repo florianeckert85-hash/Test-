@@ -1,0 +1,79 @@
+name: Android CI
+
+on:
+  push:
+    branches: ["**"]
+  workflow_dispatch:
+
+# Needed so the build can publish the APK as a GitHub Release.
+permissions:
+  contents: write
+
+env:
+  APP_NAME: Leserkonto
+  VERSION_NAME: "1.0.${{ github.run_number }}"
+  VERSION_CODE: ${{ github.run_number }}
+
+jobs:
+  build:
+    name: Build & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      - name: Run unit tests
+        run: ./gradlew test --stacktrace
+
+      - name: Assemble debug APK
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Rename APK to "<App>-<version>.apk"
+        run: |
+          set -e
+          SRC=$(find app/build/outputs/apk/debug -name '*.apk' | head -n1)
+          DEST="${APP_NAME}-${VERSION_NAME}.apk"
+          cp "$SRC" "$DEST"
+          echo "APK_FILE=$DEST" >> "$GITHUB_ENV"
+
+      - name: Upload APK (workflow artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APK_FILE }}
+          path: ${{ env.APK_FILE }}
+          if-no-files-found: warn
+
+      # Publish a rolling pre-release whose single asset is named with the app
+      # name + version. The release page URL stays stable; the asset filename
+      # carries the version. Delete+recreate keeps only the newest APK attached.
+      - name: Publish versioned APK to rolling release
+        if: >-
+          github.ref == 'refs/heads/main' ||
+          github.ref == 'refs/heads/claude/library-account-android-app-5oya8z'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          # Release notes = the last few commit subjects (no trailers).
+          NOTES=$(git log -8 --no-merges --pretty=format:'- %s')
+          BODY=$(printf 'Automatisch gebaute Debug-Version.\nDatei: %s\n\nLetzte Änderungen:\n%s\n\nCommit: %s' \
+            "$APK_FILE" "$NOTES" "${{ github.sha }}")
+          gh release delete debug-latest --yes --cleanup-tag || true
+          gh release create debug-latest "$APK_FILE" \
+            --target "${{ github.sha }}" \
+            --title "${APP_NAME} ${VERSION_NAME}" \
+            --prerelease \
+            --notes "$BODY"
